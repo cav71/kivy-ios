@@ -18,13 +18,60 @@ import warnings
 import dataclasses as dc
 
 from types import ModuleType
-from typing import Any, List, Optional, Dict
+from typing import Any, List, Optional, Dict, Union
 from pathlib import Path
 
+import attr
 import click
 
 logger = logging.getLogger(__name__)
 sh_logging = logging.getLogger('sh')
+
+
+def unravel(data: dict[str, Union[str, List[str]]]) -> Dict[str, Union[str, List[str]]]:
+    def _iter(value, data):
+        pre = value
+        post = value.format(**data)
+        while pre != post:
+            pre = post
+            post = value.format(**data)
+        return post
+
+    original = data.copy()
+    for key, value in data.items():
+        if isinstance(value, str):
+            data[key] = _iter(value, data)
+        elif isinstance(value, (list, tuple)):
+            data[key] = [ _iter(v, data) for v in value ]
+
+    while original != data:
+        original = data.copy()
+        unravel(data)
+    return original
+
+def config_guess():
+    sh = Sh()
+    system = sh.uname("-s")
+    assert system == "Darwin", f"unsupported system [{system}]"
+
+    arch = sh.uname("-m")
+    assert arch == "arm64", f"unsupported arch [{arch}]"
+
+    vendor = "apple"
+    system = {
+        "Darwin" : "darwin",
+    }[system]
+    arch = {
+        "arm64" : "aarch64",
+    }[arch]
+    release = sh.uname("-r")
+    class M:
+        def __init__(self, tag):
+            self.tag = tag
+        def __eq__(self, pat):
+            from fnmatch import fnmatch
+            return fnmatch(self.tag, pat)
+    return M(f"{arch}-{vendor}-{system}{release}")
 
 
 def loadr(name: str, path: Optional[Path] = None) -> Optional[ModuleType]:
@@ -102,9 +149,11 @@ class Sh:
             return pathlib.Path(result)
 
 
-def get_runtime(ctx: Context) -> Dict[str,Any]:
+def get_runtime() -> Dict[str,Any]:
     sh = Sh()
     result = {}
+    failures = {"missing": []}
+
     result["sdks"] = sdks = sh.xcodebuild("-showsdks").splitlines()
 
     # get the latest iphoneos
@@ -114,18 +163,16 @@ def get_runtime(ctx: Context) -> Dict[str,Any]:
         iphoneos = iphoneos[0].split()[-1].replace("iphoneos", "")
         result["sdkver"] = sdkver = iphoneos
     else:
-        logger.error("No iphone SDK installed")
-        ok = False
+        failures["missing"].append("No iphone SDK installed")
         
     # get the latest iphonesimulator version
     iphonesim = [x for x in sdks if "iphonesimulator" in x]
     result["sdksimver"] = sdksimver = "<not-found>"
-    if not iphonesim:
+    if iphonesim:
         iphonesim = iphonesim[0].split()[-1].replace("iphonesimulator", "")
         result["sdksimver"] = sdksimver = iphonesim
     else:
-        ok = False
-        logger.error("Error: No iphonesimulator SDK installed")
+        failures["missing"].append("no iphonesimulator SDK installed")
 
     # get the path for Developer
     devpath = sh.xcode_select("-print-path").strip()
@@ -134,187 +181,80 @@ def get_runtime(ctx: Context) -> Dict[str,Any]:
     # path to the iOS SDK
     result["iossdkroot"] = iossdkroot = devroot / f"SDKs/iPhoneOS{sdkver}.sdk"
 
-    result["archs"] = archs = [Arch64Simulator(ctx=ctx), Arch64IOS(ctx=ctx)]
+    result["archs"] = archs = [] #[Arch64Simulator(ctx=ctx), Arch64IOS(ctx=ctx)]
 
     # path to some tools
     result["ccache"] = ccache = sh.which("ccache")
     result["cython"] = cython = sh.which("cython")
     if not cython:
-        ok = False
-        logger.error("Missing requirement: cython is not installed")
+        failures["missing"].append("requirement cython is not installed")
 
     # check the basic tools
     for tool in ("pkg-config", "autoconf", "automake", "libtool"):
         if sh.which(tool):
             continue
-        logger.error("Missing requirement: %s is not installed", tool)
-        ok = False
+        failures["missing"].append(f"requirement {tool} is not installed")
 
-    if not ok:
-        raise RuntimeError("missing tools")
+    if any(failures.values()):
+        msg = []
+        for reason, values in failures.items():
+            msg.append(reason)
+            for value in values:
+                msg.append(f"  {value}")
+        raise RuntimeError("missing tools {'\n'.join(msg)}")
 
-    self.use_pigz = sh.which('pigz')
-    self.use_pbzip2 = sh.which('pbzip2')
-    self.num_cores = int(sh.sysctl('-n', 'hw.ncpu'))
+    result["use_pigz"] = sh.which('pigz')
+    result["use_pbzip2"] = sh.which('pbzip2')
+    result["num_cores"] = int(sh.sysctl('-n', 'hw.ncpu'))
     #self.num_cores = num_cores if num_cores else 4  # default to 4 if we can't detect
+    return result
 
-    # remove the most obvious flags that can break the compilation
-    self.env.pop("MACOSX_DEPLOYMENT_TARGET", None)
-        self.env.pop("PYTHONDONTWRITEBYTECODE", None)
-        self.env.pop("ARCHFLAGS", None)
-        self.env.pop("CFLAGS", None)
-        self.env.pop("LDFLAGS", None)
-        return self
-    pass
+_dataclass = attr.s(slots=True, auto_attribs=True, frozen=True)
 
 
-@dc.dataclass
-class Context:
-    env = os.environ.copy()
+@_dataclass
+class Flag:
+    key : Union[str,Path]
+    value : Optional[Any] = None
+    pre : str = ""
 
-    # the directory containing this module
-    basedir: Path = pathlib.Path(__file__).parent
+    def __str__(self):
+        value = self.key if self.value is None else f"{self.key}={self.value}"
+        return f"{self.pre}{str(value)}"
 
-    # the (current) working dir
-    workdir: Path = pathlib.Path().cwd()
+    def __repr__(self):
+        return f"<{self.__class__.__name__} pre={self.pre} key={self.key} at {hex(id(self))}>"
+    def format(self, **kwargs):
+        return self.__class__(pathlib.Path(str(self.key).format(**kwargs)))
 
-    prefix: Path = workdir / "dist"
-    builddir: Path = workdir / "build"
+@_dataclass
+class IFlag(Flag):
+    pre : str = "-I"
 
-    # extra search paths
-    recipesdir : Path = basedir / "recipes"
-    custom_recipes_paths: List[Path] = dc.field(default_factory=list)
+@_dataclass
+class LFlag(Flag):
+    pre : str = "-L"
 
-    include_dir : Path = workdir / "dist/include"
-    include_dirs : List[Path] = dc.field(default_factory=list)
+@_dataclass
+class DFlag(Flag):
+    pre : str = "-D"
 
-    cache_dir : Path = workdir / ".cache"
-    build_dir : Path = workdir / "build"
-    install_dir : Path = workdir / "dist/root"
-    ccache : Optional[str] = None
-    cython : Optional[str] = None
-    sdkver : Optional[str] = None
-    sdksimver : Optional[str] = None
-    iossdkroot : Optional[Path] = None
-    so_suffix : Optional[str] = None
-    devroot : Optional[Path] = None
-
-    num_cores : Optional[int] = None
-
-    archs: Optional[List["Arch"]] = None
-    _state : Optional[JsonStore] = None
+@_dataclass
+class lFlag(Flag):
+    pre : str = "-l"
 
 
-    @property
-    def root_dir(self):
-        warnings.warn("Call to a deprecated ctx.rootdir, please use ctx.basedir",
-                      category=DeprecationWarning,
-                      stacklevel=2)
-        return self.basedir
-
-    @property
-    def dist_dir(self):
-        warnings.warn("Call to a deprecated ctx.dist_dir, please use ctx.prefix",
-                      category=DeprecationWarning,
-                      stacklevel=2)
-        return self.prefix
-
-    @property
-    def concurrent_make(self):
-        return f"-j{self.num_cores}"
-
-    @property
-    def concurrent_xcodebuild(self):
-        return f"IDEBuildOperationMaxNumberOfConcurrentCompileTasks={self.num_cores}"
-
-    @property
-    def state(self) -> JsonStore:
-        if self._state is None:
-            logger.debug("loading state from %s", self.dist_dir / "state.db")
-            self._state = JsonStore(self.dist_dir / "state.db")
-        return self._state
-
-    @classmethod
-    def click(cls):
-        fields = { f.name: f for f in dc.fields(cls) }
-        wrappers = {}
-        for name in ["prefix", "workdir", "ccache"]:
-            wrappers[name] = click.option(f"--{name}", type=pathlib.Path, default=fields[name].default)
-        for name in ["num_cores",]:
-            wrappers[name] = click.option(f"--{name.replace('_', '-')}", type=int, default=fields[name].default)
-            
-        return wrappers
-
-    def populate(self):
-        sh = Sh()
-        sdks = sh.xcodebuild("-showsdks").splitlines()
-
-        # get the latest iphoneos
-        iphoneos = [x for x in sdks if "iphoneos" in x]
-        if not iphoneos:
-            logger.error("No iphone SDK installed")
-            ok = False
-        else:
-            iphoneos = iphoneos[0].split()[-1].replace("iphoneos", "")
-            self.sdkver = iphoneos
-        
-        # get the latest iphonesimulator version
-        iphonesim = [x for x in sdks if "iphonesimulator" in x]
-        if not iphonesim:
-            ok = False
-            logger.error("Error: No iphonesimulator SDK installed")
-        else:
-            iphonesim = iphonesim[0].split()[-1].replace("iphonesimulator", "")
-            self.sdksimver = iphonesim
-
-        # get the path for Developer
-        self.devroot = pathlib.Path("{}/Platforms/iPhoneOS.platform/Developer".format(
-            sh.xcode_select("-print-path").strip()))
-
-        # path to the iOS SDK
-        self.iossdkroot = self.devroot / f"SDKs/iPhoneOS{self.sdkver}.sdk"
-
-        self.archs = [Arch64Simulator(ctx=self), Arch64IOS(ctx=self)]
-
-        # path to some tools
-        ok = True
-        self.ccache = sh.which("ccache")
-        self.cython = sh.which("cython")
-        if not self.cython:
-            ok = False
-            logger.error("Missing requirement: cython is not installed")
-
-        # check the basic tools
-        for tool in ("pkg-config", "autoconf", "automake", "libtool"):
-            if sh.which(tool):
-                continue
-            logger.error("Missing requirement: %s is not installed", tool)
-            ok = False
-
-        if not ok:
-            logger.warning("aborting ..")
-            sys.exit(1)
-
-        self.use_pigz = sh.which('pigz')
-        self.use_pbzip2 = sh.which('pbzip2')
-        self.num_cores = int(sh.sysctl('-n', 'hw.ncpu'))
-        #self.num_cores = num_cores if num_cores else 4  # default to 4 if we can't detect
-
-        # remove the most obvious flags that can break the compilation
-        self.env.pop("MACOSX_DEPLOYMENT_TARGET", None)
-        self.env.pop("PYTHONDONTWRITEBYTECODE", None)
-        self.env.pop("ARCHFLAGS", None)
-        self.env.pop("CFLAGS", None)
-        self.env.pop("LDFLAGS", None)
-        return self
-
-
-@dc.dataclass
+@attr.s(slots=True, auto_attribs=True)
 class Arch:
-    ctx: Optional[Context] = None
     sdk : Optional[str] = None
     arch : Optional[str] = None
     triple: Optional[str] = None
+
+    cflags: List[str] = dc.field(default_factory=list)
+    cxxflags: List[str] = dc.field(default_factory=list)
+    cppflags: List[Union[IFlag, DFlag]] = dc.field(default_factory=list)
+    ldflags: List[LFlag] = dc.field(default_factory=list)
+    ldlibs: List[lFlag] = dc.field(default_factory=list)
 
     _sysroot: Optional[Path] = None
     _ccsh: Optional[Any] = None
@@ -325,42 +265,26 @@ class Arch:
         self._sysroot = getattr(self, "_sysroot", None)
         if self._sysroot is None:
             self._sysroot = pathlib.Path(Sh().xcrun("--sdk", self.sdk, "--show-sdk-path").strip())
-        return self._sysroot         
+        return self._sysroot
 
     def __str__(self):
         return self.arch
 
-    @property
-    def include_dirs(self):
-        return [
-            "{}/{}".format(
-                self.ctx.include_dir,
-                d.format(arch=self))
-            for d in self.ctx.include_dirs]
-
     def get_env(self):
-        include_dirs = [
-            "-I{}/{}".format(
-                self.ctx.include_dir,
-                d.format(arch=self))
-            for d in self.ctx.include_dirs]
-        include_dirs.append(f"-I{self.ctx.dist_dir / 'include' / self.arch}")
-
-        env = {}
         sh = Sh()
-        cc = sh.xcrun("-find", "-sdk", self.sdk, "clang").strip()
-        cxx = sh.xcrun("-find", "-sdk", self.sdk, "clang++").strip()
-
-        # we put the flags in CC / CXX as sometimes the ./configure test
-        # with the preprocessor (aka CC -E) without CFLAGS, which fails for
-        # cross compiled projects
-        flags = " ".join([
+        env = {}
+        cc = [
+            sh.xcrun("-find", "-sdk", self.sdk, "clang").strip(),
             "--sysroot", str(self.sysroot),
             "-arch", self.arch,
             "-pipe", "-no-cpp-precomp",
-        ])
-        cc += " " + flags
-        cxx += " " + flags
+        ]
+        cxx = [
+            sh.xcrun("-find", "-sdk", self.sdk, "clang++").strip(),
+            "--sysroot", str(self.sysroot),
+            "-arch", self.arch,
+            "-pipe", "-no-cpp-precomp",
+        ]
 
         use_ccache = os.environ.get("USE_CCACHE", "1")
         ccache = None
@@ -388,9 +312,10 @@ class Arch:
             if ccache:
                 logger.info("CC and CXX will use ccache")
                 self._ccsh.write(
-                    (ccache + ' ' + cc + ' "$@"\n').encode("utf8"))
+                    f"{ccache} {' '.join(cc)} \"$@\"\n".encode("utf8"))
+
                 self._cxxsh.write(
-                    (ccache + ' ' + cxx + ' "$@"\n').encode("utf8"))
+                    f"{ccache} {' '.join(cxx)} \"$@\"\n".encode("utf8"))
             else:
                 logger.info("CC and CXX will not use ccache")
                 self._ccsh.write(
@@ -405,9 +330,7 @@ class Arch:
         env["AR"] = sh.xcrun("-find", "-sdk", self.sdk, "ar").strip()
         env["LD"] = sh.xcrun("-find", "-sdk", self.sdk, "ld").strip()
         env["OTHER_CFLAGS"] = " ".join(include_dirs)
-        env["OTHER_LDFLAGS"] = " ".join([
-            "-L{}/{}".format(self.ctx.dist_dir, "lib"),
-        ])
+        env["OTHER_LDFLAGS"] = " ".join(self.ldflags)
         env["CFLAGS"] = " ".join([
             "-O3",
             self.version_min
@@ -424,7 +347,7 @@ class Arch:
         return env
 
 
-@dc.dataclass
+@attr.s(slots=True, auto_attribs=True)
 class Arch64Simulator(Arch):
     sdk : str = "iphonesimulator"
     arch : str = "x86_64"
@@ -432,12 +355,191 @@ class Arch64Simulator(Arch):
     version_min : str = "-miphoneos-version-min=9.0"
 
 
-@dc.dataclass
+@attr.s(slots=True, auto_attribs=True)
 class Arch64IOS(Arch):
     sdk: str = "iphoneos"
     arch : str= "arm64"
     triple : str = "aarch64-apple-darwin13"
     version_min : str = "-miphoneos-version-min=9.0"
+
+
+@attr.s(slots=True, auto_attribs=True)
+class Context:
+
+    # the (current) working dir
+    workdir: Path
+    builddir: Path
+    cachedir: Path
+    prefix: Path
+
+    # https://www.gnu.org/software/make/manual/html_node/Implicit-Variables.html
+    cflags: List[str] = attr.ib(factory=list)
+    cxxflags: List[str] = attr.ib(factory=list)
+
+    cppflags: List[Union[IFlag, DFlag]] = attr.ib(factory=list)
+    ldflags: List[LFlag] = attr.ib(factory=list)
+    ldlibs: List[lFlag] = attr.ib(factory=list)
+
+    env: Dict[str, str] = attr.ib(factory=dict)
+
+    # the directory containing this module
+    basedir: Path = pathlib.Path(__file__).parent
+    recipesdir : Path = basedir / "recipes"
+
+    @classmethod
+    def click(cls):
+        wrappers = [
+            click.option("--workdir",
+                         default=pathlib.Path().cwd()),
+            click.option("--builddir",
+                         default="{workdir}/build"),
+            click.option("--cachedir",
+                         default="{builddir}/cache"),
+            click.option("--prefix",
+                         default="{workdir}/dist"),
+
+            click.option("--cflag", "cflags", multiple=True,
+                         default=[]),
+            click.option("--cxxflag", "cxxflags", multiple=True,
+                         default=[]),
+
+            # CPPFLAGS
+            click.option("--include", "-I", "includes",
+                multiple=True, show_default=True, default=["{prefix}/include"]),
+            click.option("--define", "-D", "defines",
+                multiple=True, show_default=True, default=[]),
+
+            # # LDFLAGS/LDLIBS
+            click.option("--ldflags", "-L", "ldflags",
+                multiple=True, show_default=True,
+                default=["{prefix}/lib"]),
+            click.option("--ldlibs",
+                multiple=True, show_default=True, default=[]),
+        ]
+        def postprocess(kwargs):
+            kwargs1 = unravel(kwargs)
+
+            keys = {"workdir", "builddir", "cachedir", "prefix",
+                    "cflags", "cxxflags",
+                    "includes", "defines", "ldflags", "ldlibs",
+                    }
+            for key in keys:
+                kwargs.pop(key)
+
+            kw = {}
+            for key in {"workdir", "builddir", "cachedir", "prefix",}:
+                kw[key] = pathlib.Path(kwargs1[key])
+
+            for key in {"cflags", "cxxflags"}:
+                kw[key] = kwargs1[key]
+
+            kw["cppflags"] = [
+                *[ IFlag(flag) for flag in kwargs1["includes"] ],
+                *[ DFlag(flag) for flag in kwargs1["defines"] ],
+            ]
+
+            kw["ldflags"] = [ LFlag(flag) for flag in kwargs1["ldflags"] ]
+            kw["ldlibs"] = [ lFlag(flag) for flag in kwargs1["ldlibs"] ]
+            return Context(**kw)
+
+        return wrappers, postprocess
+
+    # extra search paths
+    #custom_recipes_paths: List[Path] = dc.field(default_factory=list)
+
+
+    # # various flag/values
+    # ccache : Optional[str] = None
+    # cython : Optional[str] = None
+    # sdkver : Optional[str] = None
+    # sdksimver : Optional[str] = None
+    # iossdkroot : Optional[Path] = None
+    # so_suffix : Optional[str] = None
+    # devroot : Optional[Path] = None
+    # num_cores : Optional[int] = None
+    #
+    # archs: Optional[List["Arch"]] = None
+    # _state : Optional[JsonStore] = None
+    #
+    # # @property
+    # # def root_dir(self):
+    # #     warnings.warn("Call to a deprecated ctx.rootdir, please use ctx.basedir",
+    # #                   category=DeprecationWarning,
+    # #                   stacklevel=2)
+    # #     return self.basedir
+    #
+    # # @property
+    # # def dist_dir(self):
+    # #     warnings.warn("Call to a deprecated ctx.dist_dir, please use ctx.prefix",
+    # #                   category=DeprecationWarning,
+    # #                   stacklevel=2)
+    # #     return self.prefix
+    #
+    # @property
+    # def concurrent_make(self):
+    #     return f"-j{self.num_cores}"
+    #
+    # @property
+    # def concurrent_xcodebuild(self):
+    #     return f"IDEBuildOperationMaxNumberOfConcurrentCompileTasks={self.num_cores}"
+    #
+    # @property
+    # def state(self) -> JsonStore:
+    #     if self._state is None:
+    #         logger.debug("loading state from %s", self.dist_dir / "state.db")
+    #         self._state = JsonStore(self.dist_dir / "state.db")
+    #     return self._state
+    #
+    # @classmethod
+    # def click(cls):
+    #     fields = { f.name: f for f in dc.fields(cls) }
+    #     wrappers = [
+    #         click.option("--prefix", type=pathlib.Path, default=fields["prefix"].default),
+    #         click.option("--cflag", "cflags", multiple=True, default=fields["cflags"].default_factory()),
+    #         click.option("--cxxflag", "cxxflags", multiple=True, default=fields["cxxflags"].default_factory()),
+    #
+    #         # CPPFLAGS
+    #         click.option("--include", "-I", "includes",
+    #             type=pathlib.Path, multiple=True, show_default=True,
+    #             default=fields["cppflags"].default),
+    #         click.option("--define", "-D", "defines",
+    #             multiple=True, show_default=True, default=[]),
+    #
+    #         # LDFLAGS/LDLIBS
+    #         click.option("--ldflags", "-L", "ldflags",
+    #             type=pathlib.Path, multiple=True, show_default=True,
+    #             default=fields["ldflags"].default),
+    #         click.option("--ldlibs",
+    #             multiple=True, show_default=True, default=[]),
+    #     ]
+    #
+    #     def postprocess(kwargs, ctx):
+    #         ctx.cflags = kwargs.pop("cflags")
+    #         ctx.cxxflags = kwargs.pop("cxxflags")
+    #         ctx.cppflags  = [ IFlag(include).format(**kwargs) for include in kwargs.pop("includes") ]
+    #         ctx.cppflags += [ DFlag(define) for define in kwargs.pop("defines") ]
+    #         ctx.ldflags = [ LFlag(ldflag).format(**kwargs) for ldflag in kwargs.pop("ldflags") ]
+    #         ctx.ldlibs = [ lFlag(ldlib) for ldlib in kwargs.pop("ldlibs")]
+    #         ctx.prefix = kwargs.pop("prefix")
+    #     return wrappers, postprocess
+    #
+    # def populate(self):
+    #     for key, value in get_runtime().items():
+    #         setattr(self, key, value)
+    #
+    #     for arch in [Arch64Simulator(), Arch64IOS()]:
+    #         for key in ["cppflags", "ldflags", ]:
+    #             getattr(arch, key).extend(p.format(**dc.asdict(self)) for p in getattr(self, key))
+    #         self.archs.append(arch)
+    #
+    #     # remove the most obvious flags that can break the compilation
+    #     self.env.pop("MACOSX_DEPLOYMENT_TARGET", None)
+    #     self.env.pop("PYTHONDONTWRITEBYTECODE", None)
+    #     self.env.pop("ARCHFLAGS", None)
+    #     self.env.pop("CFLAGS", None)
+    #     self.env.pop("LDFLAGS", None)
+
+
 
 
 class RecipeManager:
@@ -481,17 +583,22 @@ class RecipeManager:
                 if not mod:
                     continue
                 yield path.name, self.get_recipe(path.name)
-        
 
 
 # CLI part
 def common_options(fn):
-    fn = click.option("-v", "--verbose", count=True)(fn)
-    fn = click.option("-q", "--quiet", count=True)(fn)
+    fn = click.option("-v", "--verbose", count=True,
+            help="increase logging verbosity", show_default=False)(fn)
+    fn = click.option("-q", "--quiet", count=True,
+            help="decrease logging verbosity")(fn)
+    # fn = click.option("--record", help="save the running config",
+    #         type=click.Path(dir_okay=False, path_type=pathlib.Path))(fn)
+    # fn = click.option("--replay", help="replay a running config",
+    #         type=click.Path(dir_okay=False, path_type=pathlib.Path))(fn)
 
     # pulling the configurable options
-    wrappers = Context.click()
-    for wrapper in wrappers.values():
+    wrappers, postprocess = Context.click()
+    for wrapper in wrappers:
         fn = wrapper(fn)
 
     @functools.wraps(fn)
@@ -505,12 +612,7 @@ def common_options(fn):
         # Quiet the loggers we don't care about
         logging.getLogger('sh').setLevel(logging.WARNING)
 
-        # context overrides
-        kwargs["ctx"] = ctx = Context().populate()
-        for key in wrappers:
-            value = kwargs.pop(key)
-            #value = kwargs.pop(key.replace("_", "-"))
-            setattr(ctx, key, value)
+        kwargs["ctx"] = postprocess(kwargs)
         return fn(*args, **kwargs)
     return _fn
 
@@ -524,68 +626,72 @@ def main():
     pass
 
 
-@main.command()
-@click.option("--compact", is_flag=True, help="Produce a compact list suitable for scripting")
-@common_options
-def recipes(ctx, compact):
-    "List all the available recipes"
-    rm = RecipeManager(ctx)
-    if compact:
-        print(" ".join(sorted(str(r[0]) for r in rm)))
-    else:
-        for recipe in sorted(rm, key=lambda r: r.name.upper()):
-            if not recipe.version:
-                logger.debug("skipping %s without version", recipe.name)
-                continue
-            print(f"{recipe.name:<12} {recipe.version:<8}")
-
-
-@main.command(name="build_info")
-@common_options
-def build_info():
-    from pprint import pformat
-    ctx = Context()
-    ctx.populate()
-    print("Build Context")
-    print("-------------")
-    for attr in sorted(set(dir(ctx)) - {"populate"}):
-        if attr.startswith("_") or attr == "archs":
-            continue
-        if not callable(attr):
-            value = getattr(ctx, attr)
-            print(f"{attr}: {pformat(value)}")
-    for arch in ctx.archs:
-        ul = '-' * (len(str(arch))+6)
-        print("\narch: {}\n{}".format(str(arch), ul))
-        for attr in dir(arch):
-            if not attr.startswith("_"):
-                if not callable(attr) and attr not in ['arch', 'ctx', 'get_env']:
-                    print("{}: {}".format(attr, pformat(getattr(arch, attr))))
-        env = arch.get_env()
-        print("env ({}): {}".format(arch, pformat(env)))
-
-
-@main.command()
-@common_options
-def status():
-    ctx = Context()
-    rm = RecipeManager()
-    for recipe in sorted(rm.list_recipes()):
-        key = f"{recipe}.build_all"
-        keytime = f"{recipe}.build_all.at"
-        if key in ctx.state:
-            status = "Build OK (built at {})".format(ctx.state[keytime])
-        else:
-            status = "Not built"
-        print("{:<12} - {}".format(
-                recipe, status))
-
-
+#@main.command()
+#@click.option("--compact", is_flag=True, help="Produce a compact list suitable for scripting")
+#@common_options
+#def recipes(ctx, compact):
+#    "List all the available recipes"
+#    rm = RecipeManager(ctx)
+#    if compact:
+#        print(" ".join(sorted(str(r[0]) for r in rm)))
+#    else:
+#        for recipe in sorted(rm, key=lambda r: r.name.upper()):
+#            if not recipe.version:
+#                logger.debug("skipping %s without version", recipe.name)
+#                continue
+#            print(f"{recipe.name:<12} {recipe.version:<8}")
+#
+#
+#@main.command(name="build_info")
+#@common_options
+#def build_info(ctx):
+#    from pprint import pformat
+#    print("Build Context")
+#    print("-------------")
+#    for attr in sorted(set(dir(ctx)) - {"populate"}):
+#        if attr.startswith("_") or attr == "archs":
+#            continue
+#        if not callable(attr):
+#            value = getattr(ctx, attr)
+#            print(f"{attr}: {pformat(value)}")
+#    for arch in ctx.archs:
+#        ul = '-' * (len(str(arch))+6)
+#        print("\narch: {}\n{}".format(str(arch), ul))
+#        for attr in dir(arch):
+#            if not attr.startswith("_"):
+#                if not callable(attr) and attr not in ['arch', 'ctx', 'get_env']:
+#                    print("{}: {}".format(attr, pformat(getattr(arch, attr))))
+#        env = arch.get_env()
+#        print("env ({}): {}".format(arch, pformat(env)))
+#
+#
+#@main.command()
+#@common_options
+#def status():
+#    ctx = Context()
+#    rm = RecipeManager()
+#    for recipe in sorted(rm.list_recipes()):
+#        key = f"{recipe}.build_all"
+#        keytime = f"{recipe}.build_all.at"
+#        if key in ctx.state:
+#            status = "Build OK (built at {})".format(ctx.state[keytime])
+#        else:
+#            status = "Not built"
+#        print("{:<12} - {}".format(
+#                recipe, status))
+#
+#
 @main.command()
 @common_options
 def build(ctx):
-    print(ctx.num_cores)
+    keys = [
+        "workdir", "builddir", "cachedir", "prefix",
+        "cflags", "cxxflags",
+        "cppflags", "ldflags", "ldlibs",
+    ]
 
+    for key in keys:
+        print(key, getattr(ctx, key))
 
 if __name__ == "__main__":
     main()
