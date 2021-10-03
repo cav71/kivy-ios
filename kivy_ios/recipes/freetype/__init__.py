@@ -12,6 +12,7 @@ class FreetypeRecipe(Recipe):
 
     def build_arch(self, arch):
         build_env = arch.get_env()
+        breakpoint()
         configure = sh.Command(join(self.build_dir, "configure"))
         shprint(configure,
                 "CC={}".format(build_env["CC"]),

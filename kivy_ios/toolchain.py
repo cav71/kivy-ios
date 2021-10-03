@@ -697,9 +697,10 @@ class Recipe:
     def execute(self):
         if self.custom_dir:
             self.ctx.state.remove_all(self.name)
+        breakpoint()
         self.download()
         self.extract()
-        self.install_hostpython_prerequisites()
+        #self.install_hostpython_prerequisites()
         self.build_all()
 
     @property
@@ -1132,6 +1133,7 @@ def build_recipes(names, ctx):
     logger.info("Recipe order is {}".format(recipes_order))
     for recipe in recipes:
         recipe.init_with_ctx(ctx)
+    breakpoint()
     for recipe in recipes:
         recipe.execute()
 
