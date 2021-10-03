@@ -1,0 +1,22 @@
+#!/bin/bash -e
+
+# jinja defined variables
+#  ctx.prefix
+cd "{{builddir}}"
+
+export CC="{{env.cc}}"
+export CFLAGS="{{env.gnuflags.cflags | join(" ")}}"
+export CXXFLAGS="{{env.gnuflags.cxxflags | join(" ")}}"
+
+export CPPFLAGS="{{env.gnuflags.cppflags | join(" ")}}"
+
+export LD="{{env.ld}}"
+export LDFLAGS="{{env.gnuflags.ldflags | join(" ")}}"
+
+{% for tarball, subdir in tarballs.items() %}
+# processing
+tar zxvf {{tarball}}
+cd {{subdir}}
+    ./configure --prefix {{ctx.prefix}} --host {{env.gnuflags.host}}
+    make -j10
+{% endfor %}
