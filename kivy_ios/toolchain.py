@@ -11,7 +11,7 @@ import sys
 from sys import stdout
 from os.path import join, dirname, realpath, exists, isdir, basename
 from os import listdir, unlink, makedirs, environ, chdir, getcwd, walk
-import sh
+import kivy_ios.sh
 import zipfile
 import tarfile
 import importlib
@@ -29,19 +29,20 @@ from urllib.request import FancyURLopener, urlcleanup
 from pbxproj import XcodeProject
 from pbxproj.pbxextensions.ProjectFiles import FileOptions
 
-curdir = dirname(__file__)
 
+sh = kivy_ios.sh.Sh("sh")
+
+logger = logging.getLogger(__name__)
+curdir = dirname(__file__)
 initial_working_directory = getcwd()
 
 
-# Quiet the loggers we don't care about
-sh_logging = logging.getLogger('sh')
-sh_logging.setLevel(logging.WARNING)
-
-logger = logging.getLogger(__name__)
-
-
 def shprint(command, *args, **kwargs):
+    from inspect import getmodule
+    breakpoint()
+    args = args + [ sh.flag.SHPRINT ]
+    command(*args, **kwargs)
+    return
     kwargs["_iter"] = True
     kwargs["_out_bufsize"] = 1
     kwargs["_err_to_out"] = True
@@ -451,6 +452,10 @@ class Recipe:
                 setattr(cls, prop, value)
         return super().__new__(cls)
 
+    def __init__(self):
+        self.sh = kivy_ios.sh.Sh(f"sh.recipe.{self.__class__.__name__}")
+        self.sh.flag = (self.sh.flag | self.sh.flag.SHPRINT)
+
     # API available for recipes
     def download_file(self, url, filename, cwd=None):
         """
@@ -505,17 +510,17 @@ class Recipe:
                 comp = '--use-compress-program={}'.format(self.ctx.use_pigz)
             else:
                 comp = '-z'
-            shprint(sh.tar, "-C", cwd, "-xv", comp, "-f", filename)
+            self.sh.tar("-C", cwd, "-xv", comp, "-f", filename)
 
         elif filename.endswith((".tbz2", ".tar.bz2")):
             if self.ctx.use_pbzip2:
                 comp = '--use-compress-program={}'.format(self.ctx.use_pbzip2)
             else:
                 comp = '-j'
-            shprint(sh.tar, "-C", cwd, "-xv", comp, "-f", filename)
+            self.sh.tar("-C", cwd, "-xv", comp, "-f", filename)
 
         elif filename.endswith(".zip"):
-            shprint(sh.unzip, "-d", cwd, filename)
+            sels.sh.unzip("-d", cwd, filename)
 
         else:
             logger.error("Cannot extract, unrecognized extension for {}".format(
@@ -878,7 +883,7 @@ class Recipe:
             args += [
                 "-arch", arch.arch,
                 join(self.get_build_dir(arch.arch), library_fn)]
-        shprint(sh.lipo, "-create", "-output", filename, *args)
+        self.sh.lipo("-create", "-output", filename, *args)
 
     @cache_execution
     def install_frameworks(self):
@@ -1027,8 +1032,7 @@ class PythonRecipe(Recipe):
         chdir(build_dir)
         hostpython = sh.Command(self.ctx.hostpython)
 
-        shprint(
-            hostpython,
+        self.sh.hostpython(
             "setup.py",
             "install",
             "-O2",
@@ -1056,7 +1060,7 @@ class CythonRecipe(PythonRecipe):
         # doesn't (yet) have the executable bit hence we explicitly call it
         # with the Python interpreter
         cythonize_script = join(self.ctx.root_dir, "tools", "cythonize.py")
-        shprint(sh.python, cythonize_script, filename)
+        self.sh.python(cythonize_script, filename)
 
     def cythonize_build(self):
         if not self.cythonize:

@@ -1,6 +1,8 @@
-from kivy_ios.toolchain import Recipe, shprint
+from kivy_ios.toolchain import Recipe, sh
 from os.path import join
-import sh
+
+
+sh = sh.child(__name__)
 
 
 class FreetypeRecipe(Recipe):
@@ -12,8 +14,9 @@ class FreetypeRecipe(Recipe):
 
     def build_arch(self, arch):
         build_env = arch.get_env()
-        configure = sh.Command(join(self.build_dir, "configure"))
-        shprint(configure,
+        #configure = self.sh.Command(join(self.build_dir, "configure"))
+        breakpoint()
+        self.sh.configure(
                 "CC={}".format(build_env["CC"]),
                 "LD={}".format(build_env["LD"]),
                 "CFLAGS={}".format(build_env["CFLAGS"]),
@@ -27,8 +30,8 @@ class FreetypeRecipe(Recipe):
                 "--without-old-mac-fonts",
                 "--enable-static=yes",
                 "--enable-shared=no")
-        shprint(sh.make, "clean")
-        shprint(sh.make, self.ctx.concurrent_make)
+        self.sh.make("clean")
+        self.sh.make(self.ctx.concurrent_make)
 
 
 recipe = FreetypeRecipe()
