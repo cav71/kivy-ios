@@ -32,17 +32,27 @@ from pbxproj.pbxextensions.ProjectFiles import FileOptions
 
 sh = kivy_ios.sh.Sh("sh")
 
-logger = logging.getLogger(__name__)
 curdir = dirname(__file__)
+
 initial_working_directory = getcwd()
+
+logger = logging.getLogger(__name__)
+
+
+def log_setup(level, quiet=True):
+    """ Setup logging at level. """
+    # customize loging here
+    if quiet:
+        level -= 1
+    level = logging.DEBUG if level > 0 else logging.WARNING if level < 0 else logging.INFO
+    # For more detailed logging, use something like
+    # format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(funcName)s():%(lineno)d] %(message)s'
+    logging.basicConfig(format='[%(levelname)-8s] %(message)s',
+        datefmt='%Y-%m-%d:%H:%M:%S',
+        level=level)
 
 
 def shprint(command, *args, **kwargs):
-    from inspect import getmodule
-    breakpoint()
-    args = args + [ sh.flag.SHPRINT ]
-    command(*args, **kwargs)
-    return
     kwargs["_iter"] = True
     kwargs["_out_bufsize"] = 1
     kwargs["_err_to_out"] = True
@@ -79,18 +89,6 @@ def remove_junk(d):
             if fn.endswith(exts):
                 print('Found junk {}/{}, removing'.format(root, fn))
                 unlink(join(root, fn))
-
-
-def log_setup(level, quiet=True):
-    """ Setup logging at level. """
-    if quiet:
-        level -= 1
-    level = logging.DEBUG if level > 0 else logging.WARNING if level < 0 else logging.INFO
-    # For more detailed logging, use something like
-    # format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(funcName)s():%(lineno)d] %(message)s'
-    logging.basicConfig(format='[%(levelname)-8s] %(message)s',
-        datefmt='%Y-%m-%d:%H:%M:%S',
-        level=level)
 
 
 class ChromeDownloader(FancyURLopener):
