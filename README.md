@@ -32,8 +32,8 @@ Before we start, we strongly advise to use a conda environment to install Python
 ---
 **NOTE**
 
-kivy_ios package is not ready, instruction here assume the build happen in the source tree.
-
+kivy_ios package is not ready, instructions here assume the build happens in the source tree
+(hence the reason for the alias).
 ---
 
 Additionally you would need few system dependencies and configuration.
@@ -53,47 +53,19 @@ You can list the available recipes and their versions with:
 
     $ toolchain recipes
     audiostream  master
-    click        7.1.2
+    curly        master
     cymunk       master
-    ffmpeg       n4.3.1
-    ffpyplayer   v3.2
-    flask        1.1.2
+    ffpyplayer   4.2.0
     freetype     2.5.5
-    hostlibffi   3.2.1
-    hostopenssl  1.1.1g
-    hostpython3  3.7.1
-    ios          master
-    itsdangerous 1.1.0
-    jinja2       2.11.2
-    kivy         1.10.1
-    libffi       3.2.1
-    libjpeg      v9a
-    libpng       1.6.26
-    markupsafe   1.1.1
-    moodstocks   4.1.5
-    numpy        1.16.4
-    openssl      1.1.1g
-    photolibrary master
-    pillow       6.1.0
-    plyer        master
-    pycrypto     2.6.1
-    pykka        1.2.1
-    pyobjus      master
-    python3      3.7.1
-    pyyaml       3.11
-    sdl2         2.0.8
-    sdl2_image   2.0.0
-    sdl2_mixer   2.0.0
-    sdl2_ttf     2.0.12
-    werkzeug     1.0.1
+    ...
 
 Then, start the compilation with:
 
-    $ toolchain build python3 kivy
+    $ toolchain build kivy
 
 You can build recipes at the same time by adding them as parameters:
 
-    $ toolchain build python3 openssl kivy
+    $ toolchain build python3
 
 Recipe builds can be removed via the clean command e.g.:
 
