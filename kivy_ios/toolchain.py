@@ -11,7 +11,6 @@ import sys
 from sys import stdout
 from os.path import join, dirname, realpath, exists, isdir, basename
 from os import listdir, unlink, makedirs, environ, chdir, getcwd, walk
-import sh
 import zipfile
 import tarfile
 import importlib
@@ -28,6 +27,9 @@ import logging
 from urllib.request import FancyURLopener, urlcleanup
 from pbxproj import XcodeProject
 from pbxproj.pbxextensions.ProjectFiles import FileOptions
+
+import kivy_ios.sh
+sh = kivy_ios.sh.Sh()
 
 curdir = dirname(__file__)
 
@@ -53,15 +55,7 @@ def log_setup(level, quiet=True):
 
 
 def shprint(command, *args, **kwargs):
-    kwargs["_iter"] = True
-    kwargs["_out_bufsize"] = 1
-    kwargs["_err_to_out"] = True
-    logger.info("Running Shell: {} {} {}".format(str(command), args, kwargs))
-    cmd = command(*args, **kwargs)
-    for line in cmd:
-        # strip only last CR:
-        line_str = "\n".join(line.encode("ascii", "replace").decode().splitlines())
-        logger.debug(line_str)
+    return command(command.flag | command.flag.SHPRINT, *args, **kwargs)
 
 
 def cache_execution(f):

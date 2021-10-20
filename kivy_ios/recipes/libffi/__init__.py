@@ -1,5 +1,4 @@
-from kivy_ios.toolchain import Recipe, shprint
-import sh
+from kivy_ios.toolchain import Recipe, shprint, sh
 from os.path import exists
 
 
