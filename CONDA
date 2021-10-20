@@ -1,0 +1,13 @@
+conda branch
+============
+
+This branch is the merge of logging-fixes + sh-replacement branches + changes to make it to work in conda.
+
+TL;DR;
+
+conda create -n kivy autoconf automake setuptools pkg-config cython openstep-parser pbxproj
+conda activate kivy
+
+python toolchain.py build --arch arm64 libffi -v
+python toolchain.py build --arch arm64 openssl -v
+python toolchain.py build --arch arm64 python3 -v
