@@ -25,7 +25,8 @@ These recipes are not ported to the new toolchain yet:
 
 Before we start, we strongly advise to use a conda environment to install Python packages.
 
-      conda create -p venv autoconf automake libtool pkg-config setuptools cython openstep-parser pbxproj
+      conda create -p venv autoconf automake libtool pkg-config \
+            setuptools cython openstep-parser pbxproj
       conda activate -p venv
       alias toolchain="PYTHONPATH=$(pwd) python -m kivy_ios.toolchain"
 ---
