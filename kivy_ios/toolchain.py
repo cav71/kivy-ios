@@ -10,7 +10,7 @@ import argparse
 import sys
 from sys import stdout
 from os.path import join, dirname, realpath, exists, isdir, basename
-from os import listdir, unlink, makedirs, environ, chdir, getcwd, walk
+from os import listdir, unlink, environ, chdir, getcwd, walk
 import kivy_ios.sh
 import zipfile
 import tarfile
@@ -21,6 +21,8 @@ import shutil
 import fnmatch
 import tempfile
 import time
+import contextlib
+from pathlib import Path
 from contextlib import suppress
 from datetime import datetime
 from pprint import pformat
@@ -28,6 +30,7 @@ import logging
 from urllib.request import FancyURLopener, urlcleanup
 from pbxproj import XcodeProject
 from pbxproj.pbxextensions.ProjectFiles import FileOptions
+from kivy_ios import misc
 
 
 sh = kivy_ios.sh.Sh("sh")
@@ -37,31 +40,25 @@ curdir = dirname(__file__)
 initial_working_directory = getcwd()
 
 logger = logging.getLogger(__name__)
+shprint = kivy_ios.sh.SHPrint("recipes")
 
 
-def log_setup(level, quiet=True):
+def log_setup(level, quiet=False):
     """ Setup logging at level. """
     # customize loging here
-    if quiet:
-        level -= 1
+
+    level += -1 if quiet else 0
     level = logging.DEBUG if level > 0 else logging.WARNING if level < 0 else logging.INFO
-    # For more detailed logging, use something like
-    # format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(funcName)s():%(lineno)d] %(message)s'
-    logging.basicConfig(format='[%(levelname)-8s] %(message)s',
-        datefmt='%Y-%m-%d:%H:%M:%S',
-        level=level)
 
-
-def shprint(command, *args, **kwargs):
-    kwargs["_iter"] = True
-    kwargs["_out_bufsize"] = 1
-    kwargs["_err_to_out"] = True
-    logger.info("Running Shell: {} {} {}".format(str(command), args, kwargs))
-    cmd = command(*args, **kwargs)
-    for line in cmd:
-        # strip only last CR:
-        line_str = "\n".join(line.encode("ascii", "replace").decode().splitlines())
-        logger.debug(line_str)
+    logging.basicConfig(level=level)
+    class Formatter(logging.Formatter):
+        def format(self, record):
+            record.letter = record.levelname[0]
+            return super(Formatter, self).format(record)
+    formatter = Formatter(
+            fmt='%(letter)s  [%(threadName)s.%(filename)s.%(lineno)i] %(message)s',
+            datefmt='%Y-%m-%d:%H:%M:%S')
+    logging.root.handlers[0].setFormatter(formatter)
 
 
 def cache_execution(f):
@@ -89,6 +86,14 @@ def remove_junk(d):
             if fn.endswith(exts):
                 print('Found junk {}/{}, removing'.format(root, fn))
                 unlink(join(root, fn))
+
+
+def makedirs(*args):
+    result = Path(args[0])
+    for a in args[1:]:
+        result /= a
+    result.mkdir(parents=True, exist_ok=True)
+    return result
 
 
 class ChromeDownloader(FancyURLopener):
@@ -368,7 +373,7 @@ class Context:
         # path to some tools
         self.ccache = sh.which("ccache")
         for cython_fn in ("cython-2.7", "cython"):
-            cython = sh.which(cython_fn)
+            cython = sh.cmd(cython_fn, abort=False)
             if cython:
                 self.cython = cython
                 break
@@ -388,21 +393,19 @@ class Context:
         self.use_pigz = sh.which('pigz')
         self.use_pbzip2 = sh.which('pbzip2')
 
-        try:
-            num_cores = int(sh.sysctl('-n', 'hw.ncpu'))
-        except Exception:
-            num_cores = None
-        self.num_cores = num_cores if num_cores else 4  # default to 4 if we can't detect
+        self.num_cores = 4 # default to 4 if we can't detect
+        with contextlib.suppress(ValueError):
+            self.num_cores = int(sh.sysctl('-n', 'hw.ncpu'))
 
         self.custom_recipes_paths = []
-        ensure_dir(self.root_dir)
-        ensure_dir(self.build_dir)
-        ensure_dir(self.cache_dir)
-        ensure_dir(self.dist_dir)
-        ensure_dir(join(self.dist_dir, "frameworks"))
-        ensure_dir(self.install_dir)
-        ensure_dir(self.include_dir)
-        ensure_dir(join(self.include_dir, "common"))
+        makedirs(self.root_dir)
+        makedirs(self.build_dir)
+        makedirs(self.cache_dir)
+        makedirs(self.dist_dir)
+        makedirs(self.dist_dir, "frameworks")
+        makedirs(self.install_dir)
+        makedirs(self.include_dir)
+        makedirs(self.include_dir, "common")
 
         # remove the most obvious flags that can break the compilation
         self.env.pop("MACOSX_DEPLOYMENT_TARGET", None)
@@ -423,7 +426,7 @@ class Context:
         return "IDEBuildOperationMaxNumberOfConcurrentCompileTasks={}".format(self.num_cores)
 
 
-class Recipe:
+class Recipe(metaclass=misc.Tracer):
     props = {
         "is_alias": False,
         "version": None,
@@ -444,15 +447,13 @@ class Recipe:
         "hostpython_prerequisites": []
     }
 
-    def __new__(cls):
-        for prop, value in cls.props.items():
-            if not hasattr(cls, prop):
-                setattr(cls, prop, value)
-        return super().__new__(cls)
-
     def __init__(self):
-        self.sh = kivy_ios.sh.Sh(f"sh.recipe.{self.__class__.__name__}")
+        self.log = logging.getLogger(f"recipe.{self.__class__.__name__}")
+        self.sh = kivy_ios.sh.Sh(f"recipe.{self.__class__.__name__}.sh")
         self.sh.flag = (self.sh.flag | self.sh.flag.SHPRINT)
+
+    def hello(self):
+        self.log.info("oooo")
 
     # API available for recipes
     def download_file(self, url, filename, cwd=None):
@@ -665,6 +666,8 @@ class Recipe:
         return arch.get_env()
 
     def set_hostpython(self, instance, version):
+        # XXX
+        #breakpoint()
         state = self.ctx.state
         hostpython = state.get("hostpython")
         if hostpython is None:
@@ -768,7 +771,7 @@ class Recipe:
             if exists(src_dir):
                 shutil.copytree(src_dir, dest_dir)
                 return
-            ensure_dir(build_dir)
+            makedirs(build_dir)
             self.extract_file(self.archive_fn, build_dir)
 
     @cache_execution
@@ -817,14 +820,14 @@ class Recipe:
             if not name.startswith("lib"):
                 name = "lib{}".format(name)
             static_fn = join(self.ctx.dist_dir, "lib", "{}.a".format(name))
-            ensure_dir(dirname(static_fn))
+            makedirs(dirname(static_fn))
             logger.info("Lipo {} to {}".format(self.name, static_fn))
             self.make_lipo(static_fn)
         if self.libraries:
             logger.info("Create multiple lipo for {}".format(name))
             for library in self.libraries:
                 static_fn = join(self.ctx.dist_dir, "lib", basename(library))
-                ensure_dir(dirname(static_fn))
+                makedirs(dirname(static_fn))
                 logger.info("  - Lipo-ize {}".format(library))
                 self.make_lipo(static_fn, library)
         logger.info("Install include files for {}".format(self.name))
@@ -893,7 +896,7 @@ class Recipe:
             logger.info("Install Framework {}".format(framework))
             src = join(build_dir, framework)
             dest = join(self.ctx.dist_dir, "frameworks", framework)
-            ensure_dir(dirname(dest))
+            makedirs(dirname(dest))
             shutil.rmtree(dest, ignore_errors=True)
             logger.debug("Copy {} to {}".format(src, dest))
             shutil.copytree(src, dest)
@@ -908,7 +911,7 @@ class Recipe:
             logger.info("Install Sources{}".format(source))
             src = join(build_dir, source)
             dest = join(self.ctx.dist_dir, "sources", self.name)
-            ensure_dir(dirname(dest))
+            makedirs(dirname(dest))
             shutil.rmtree(dest, ignore_errors=True)
             logger.debug("Copy {} to {}".format(src, dest))
             shutil.copytree(src, dest)
@@ -948,7 +951,7 @@ class Recipe:
                 else:
                     dest = join(dest_dir, dest_name)
                     logger.info("Copy Include {} to {}".format(src_dir, dest))
-                    ensure_dir(dirname(dest))
+                    makedirs(dirname(dest))
                     shutil.copy(src_dir, dest)
 
     @cache_execution
@@ -1074,7 +1077,7 @@ class CythonRecipe(PythonRecipe):
             if fnmatch.filter(filenames, "*.so.libs"):
                 dirs.append(root)
         cmd = sh.Command(join(self.ctx.root_dir, "tools", "biglink"))
-        shprint(cmd, join(self.build_dir, "lib{}.a".format(self.name)), *dirs)
+        getattr(sh, cmd, join(self.build_dir, "lib{}.a".format(self.name)), *dirs)
 
     def get_recipe_env(self, arch):
         env = super().get_recipe_env(arch)
@@ -1142,10 +1145,6 @@ def build_recipes(names, ctx):
         recipe.init_with_ctx(ctx)
     for recipe in recipes:
         recipe.execute()
-
-
-def ensure_dir(filename):
-    makedirs(filename, exist_ok=True)
 
 
 def ensure_recipes_loaded(ctx):
@@ -1376,6 +1375,8 @@ pip           Install a pip dependency into the distribution
         if args.no_pbzip2:
             ctx.use_pbzip2 = False
 
+        # XXX
+        #breakpoint()
         self.validate_custom_recipe_paths(ctx, args.add_custom_recipe)
 
         ctx.use_pigz = ctx.use_pbzip2
@@ -1385,6 +1386,8 @@ pip           Install a pip dependency into the distribution
         if ctx.use_pbzip2:
             logger.info("Using pbzip2 to decompress bzip2 data")
 
+        # TODO review these
+        ctx.hostpython = sh.which("python")
         build_recipes(args.recipe, ctx)
 
     def recipes(self):

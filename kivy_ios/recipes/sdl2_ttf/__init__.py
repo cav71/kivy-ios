@@ -1,6 +1,5 @@
 from kivy_ios.toolchain import Recipe, shprint
 from os.path import join
-import sh
 import shutil
 import shlex
 
@@ -17,12 +16,11 @@ class LibSDL2TTFRecipe(Recipe):
         # ./configure require too much things to setup it correcly.
         # so build by hand.
         build_env = arch.get_env()
-        cc = sh.Command(build_env["CC"])
         output = join(self.build_dir, "SDL_ttf.o")
         args = shlex.split(build_env["CFLAGS"])
         args += ["-c", "-o", output, "SDL_ttf.c"]
-        shprint(cc, *args)
-        shprint(sh.ar, "-q", join(self.build_dir, "libSDL2_ttf.a"), output)
+        getattr(shprint, build_env.get("CC", "cc"))(*args)
+        shprint.ar("-q", join(self.build_dir, "libSDL2_ttf.a"), output)
 
     def install(self):
         for arch in self.filtered_archs:

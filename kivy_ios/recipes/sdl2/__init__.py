@@ -1,5 +1,4 @@
 from kivy_ios.toolchain import Recipe, shprint
-import sh
 
 
 class LibSDL2Recipe(Recipe):
@@ -22,7 +21,8 @@ class LibSDL2Recipe(Recipe):
 
     def build_arch(self, arch):
         env = arch.get_env()
-        shprint(sh.xcodebuild, self.ctx.concurrent_xcodebuild,
+
+        shprint.xcodebuild(self.ctx.concurrent_xcodebuild,
                 "ONLY_ACTIVE_ARCH=NO",
                 "ARCHS={}".format(arch.arch),
                 "BITCODE_GENERATION_MODE=bitcode",

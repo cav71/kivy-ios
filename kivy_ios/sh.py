@@ -10,17 +10,27 @@
 #    sh.ls("not-present", sh.flag.DEFAULT 
 #  sh.xcodebuild("-sdk", "-version", "-json", sh.flag.JSON)
 
+import os
 import logging
 import enum
 import operator
+import inspect
 import subprocess
 import json
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union, Callable
 
 
 logger = logging.getLogger(__name__)
+
+
+class ShBaseError(Exception):
+    pass
+
+
+class FileNotFound(ShBaseError):
+    pass
 
 
 class Flag(enum.IntFlag):
@@ -28,10 +38,11 @@ class Flag(enum.IntFlag):
     STRIP = enum.auto()
     JSON = enum.auto()
     SHPRINT = enum.auto()
-    DEFAULT = ABORT | STRIP
 
 
 class ShBase:
+    DEFAULT = Flag.STRIP | Flag.ABORT
+
     @property
     def log(self):
         self._log = getattr(self, "_log", logger)
@@ -43,10 +54,7 @@ class ShBase:
 
     def __init__(self, logname=None, flag=None):
         self.log = logname
-        self.flag = Flag.DEFAULT if flag is None else flag
-
-    def child(self, name):
-        return self.__class__(f"{self._log.name}.{name}") 
+        self.flag = self.DEFAULT if flag is None else flag
 
     def __getattr__(self, cmd: str, *args, **kwargs) -> Any:
         def _fn(*args0, **kwargs0):
@@ -55,10 +63,17 @@ class ShBase:
             assert len(flag) in {0, 1}, f"cannot pass more than one or no flags [{flag}]"
             flag = flag[0] if flag else self.flag
 
-            self.log.debug("running (with flag=%s): %s", flag, arguments)
+            if 'env' in kwargs0:
+                env = kwargs0.pop("env")
+            else:
+                env = os.environ.copy()
+                env["PATH"] = os.pathsep.join([".", *(env.get("PATH", "").split(os.pathsep))])
+
+            self.log.debug("running: %s", arguments)
             p = subprocess.Popen(arguments,
-                    encoding="utf-8",
+                    encoding="utf-8", env=env,
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs0)
+
             out, err = p.communicate()
             # similar to shprint
             if flag & Flag.SHPRINT:
@@ -78,17 +93,42 @@ class ShBase:
                 out = json.loads(out)
             return out
         return _fn
-
+    
 
 class Sh(ShBase):
-    flag = Flag(Flag.STRIP)
-    #def which(self, arg: str) -> Optional[Path]:
-    #    result = self.__getattr__("which")(arg)
-    #    if result.strip():
-    #        return pathlib.Path(result)
-
     def __getattr__(self, cmd: str, *args, **kwargs) -> Any:
         cmd = {
             "xcode_select": "xcode-select",
         }.get(cmd, cmd)
         return super(Sh, self).__getattr__(cmd, *args, **kwargs)
+
+    def child(self, name):
+        return self.__class__(logname=f"{self._log.name}.{name}", flag=self.flag)
+
+    def which(self, arg: str, abort:bool=False) -> Optional[Path]:
+        result = self.__getattr__("which")(arg, self.flag ^ Flag.ABORT)
+        if abort:
+            raise FileNotFound(f"cannot find executable {arg}")
+        return Path(result) if result else None
+
+    def cmd(self, name: Union[str, Path], abort: bool=True) -> Optional[Callable]:
+        exe = self.which(name, abort=abort)
+        if not exe:
+            return
+        def _fn(*args, **kwargs):
+            return getattr(self, str(exe))(*args, **kwargs)
+        return _fn
+
+
+class SHPrint():
+    def __init__(self, logname):
+        self.logname = logname
+        self.shs = {}
+    def __getattr__(self, name):
+        frame = inspect.stack()[1]
+        module = inspect.getmodule(frame.frame)
+        logname = f"{self.logname}.{module.__name__.rpartition('.')[2]}"
+        if not logname in self.shs:
+            self.shs[logname] = Sh(logname, Sh.DEFAULT | Flag.SHPRINT)
+        return getattr(self.shs[logname], name)
+

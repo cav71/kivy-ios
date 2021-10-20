@@ -1,6 +1,5 @@
 from kivy_ios.toolchain import Recipe, shprint
 from os.path import join
-import sh
 
 
 class LibSDL2ImageRecipe(Recipe):
@@ -12,7 +11,7 @@ class LibSDL2ImageRecipe(Recipe):
     pbx_frameworks = ["CoreGraphics", "MobileCoreServices"]
 
     def build_arch(self, arch):
-        shprint(sh.xcodebuild, self.ctx.concurrent_xcodebuild,
+        shprint.xcodebuild(self.ctx.concurrent_xcodebuild,
                 "ONLY_ACTIVE_ARCH=NO",
                 "ARCHS={}".format(arch.arch),
                 "BITCODE_GENERATION_MODE=bitcode",

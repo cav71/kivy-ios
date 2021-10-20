@@ -1,5 +1,4 @@
 from kivy_ios.toolchain import Recipe, shprint
-import sh
 
 
 class LibSDL2MixerRecipe(Recipe):
@@ -15,7 +14,7 @@ class LibSDL2MixerRecipe(Recipe):
         # endian.h is in /usr/include/machine/ (Since MacOs Mojave?)
         # header is needed by libvorbis, so We're adding that folder
         # to HEADER_SEARCH_PATHS
-        shprint(sh.xcodebuild, self.ctx.concurrent_xcodebuild,
+        shprint.xcodebuild(self.ctx.concurrent_xcodebuild,
                 "ONLY_ACTIVE_ARCH=NO",
                 "ARCHS={}".format(arch.arch),
                 "BITCODE_GENERATION_MODE=bitcode",

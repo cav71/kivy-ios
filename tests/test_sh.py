@@ -42,3 +42,10 @@ def test_shprint(caplog):
         assert ('my-log-name', logging.DEBUG, 'err> ') in caplog.record_tuples
         assert ('my-log-name', logging.DEBUG, f'out> {__file__}') in caplog.record_tuples
         caplog.clear()
+
+
+def test_fullcmd(caplog):
+    "using an executable full path"
+    sh = kivy_ios.sh.Sh("my-log-name", flag=kivy_ios.sh.Flag.STRIP)
+    ls = sh.which("ls")
+    assert __file__ == getattr(sh, ls)(__file__)

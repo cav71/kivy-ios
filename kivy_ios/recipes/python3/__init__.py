@@ -1,7 +1,6 @@
-from kivy_ios.toolchain import Recipe, shprint
+from kivy_ios.toolchain import Recipe, shprint, sh
 from kivy_ios.context_managers import cd
 from os.path import join
-import sh
 import shutil
 import os
 import logging
@@ -12,7 +11,7 @@ logger = logging.getLogger(__name__)
 class Python3Recipe(Recipe):
     version = "3.9.2"
     url = "https://www.python.org/ftp/python/{version}/Python-{version}.tgz"
-    depends = ["hostpython3", "libffi", "openssl"]
+    depends = ["libffi", "openssl"]
     library = "libpython3.9.a"
     pbx_libraries = ["libz", "libbz2", "libsqlite3"]
 
@@ -44,6 +43,7 @@ class Python3Recipe(Recipe):
             py_arch = "aarch64"
         tmp_folder = "temp.ios-{}-3.9{}".format(py_arch, self.build_dir)
         build_env = self.get_build_env(arch)
+        ar = getattr(shprint, build_env.get("AR", "ar")) 
         for o_file in [
             "cache.o",
             "connection.o",
@@ -55,7 +55,7 @@ class Python3Recipe(Recipe):
             "statement.o",
             "util.o",
         ]:
-            shprint(sh.Command(build_env['AR']),
+            ar(
                     "-r",
                     "{}/{}".format(self.build_dir, self.library),
                     "{}/build/{}/Modules/_sqlite/{}".format(self.build_dir, tmp_folder, o_file))
@@ -63,20 +63,18 @@ class Python3Recipe(Recipe):
 
     def get_build_env(self, arch):
         build_env = arch.get_env()
-        build_env["PATH"] = "{}:{}".format(
-            join(self.ctx.dist_dir, "hostpython3", "bin"),
-            os.environ["PATH"])
         build_env["CFLAGS"] += " --sysroot={}".format(arch.sysroot)
         return build_env
 
     def build_arch(self, arch):
         build_env = self.get_build_env(arch)
-        configure = sh.Command(join(self.build_dir, "configure"))
+        configure = getattr(shprint, join(self.build_dir, "configure"))
         py_arch = arch.arch
         if py_arch == "arm64":
             py_arch = "aarch64"
         prefix = join(self.ctx.dist_dir, "root", "python3")
-        shprint(configure,
+        assert self.ctx.hostpython
+        configure(
                 "CC={}".format(build_env["CC"]),
                 "LD={}".format(build_env["LD"]),
                 "CFLAGS={}".format(build_env["CFLAGS"].replace("-fembed-bitcode", "")),
@@ -127,19 +125,23 @@ class Python3Recipe(Recipe):
                     _PYTHON_HOST_PLATFORM=$(_PYTHON_HOST_PLATFORM) \
                     PYTHONPATH=$(shell test -f pybuilddir.txt && echo $(abs_builddir)/`cat pybuilddir.txt`:)$(srcdir)/Lib\
                     _PYTHON_SYSCONFIGDATA_NAME=_sysconfigdata_$(ABIFLAGS)_$(MACHDEP)_$(MULTIARCH)\
-                    {}".format(sh.Command(self.ctx.hostpython)),
-                _env=build_env)
-        shprint(sh.make, self.ctx.concurrent_make, "CFLAGS={}".format(build_env["CFLAGS"]))
+                    {}".format(self.ctx.hostpython),
+                env=build_env)
+        shprint.make(self.ctx.concurrent_make, "CFLAGS={}".format(build_env["CFLAGS"]))
 
     def install(self):
         arch = list(self.filtered_archs)[0]
         build_env = self.get_build_env(arch)
         build_dir = self.get_build_dir(arch.arch)
-        shprint(sh.make, self.ctx.concurrent_make,
+        try:
+            shprint.make(self.ctx.concurrent_make,
                 "-C", build_dir,
                 "install",
                 "prefix={}".format(join(self.ctx.dist_dir, "root", "python3")),
-                _env=build_env)
+                env=build_env)
+        except Exception as e:
+            breakpoint()
+            pass
         self.install_mock_modules()
         self.reduce_python()
 
