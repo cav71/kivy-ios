@@ -1149,6 +1149,7 @@ def ensure_recipes_loaded(ctx):
 
 
 def _pip(args):
+    raise NotImplementedError("need review")
     ctx = Context()
     for recipe in Recipe.list_recipes():
         key = "{}.build_all".format(recipe)
@@ -1180,6 +1181,7 @@ def _pip(args):
 
 
 def _hostpython_pip(args):
+    raise NotImplementedError("need review")
     ctx = Context()
     pip_path = join(ctx.dist_dir, 'hostpython3', 'bin', 'pip3')
     logger.info("Executing pip for hostpython with: {}".format(args))
@@ -1189,6 +1191,7 @@ def _hostpython_pip(args):
 
 def update_pbxproj(filename, pbx_frameworks=None):
     # list all the compiled recipes
+    raise NotImplementedError("need review")
     ctx = Context()
     pbx_libraries = []
     if pbx_frameworks is None:
@@ -1375,6 +1378,7 @@ pip           Install a pip dependency into the distribution
             logger.info("Using pigz to decompress gzip data")
         if ctx.use_pbzip2:
             logger.info("Using pbzip2 to decompress bzip2 data")
+        ctx.hostpython = sys.executable
 
         build_recipes(args.recipe, ctx)
 
