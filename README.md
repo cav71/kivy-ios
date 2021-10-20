@@ -23,25 +23,23 @@ These recipes are not ported to the new toolchain yet:
 
 ## Installation & requirements
 
-Before we start, we strongly advise to use a Python virtual environment to install Python packages.
+Before we start, we strongly advise to use a conda environment to install Python packages.
 
-      python3 -m venv venv
-      . venv/bin/activate
+      conda create -p venv autoconf automake libtool pkg-config setuptools cython openstep-parser pbxproj
+      conda activate -p venv
+      alias toolchain="PYTHONPATH=$(pwd) python -m kivy_ios.toolchain"
+---
+**NOTE**
 
-Install [Kivy for iOS from PyPI](https://pypi.org/project/kivy-ios) with pip like any Python package.
+kivy_ios package is not ready, instruction here assume the build happen in the source tree.
 
-      pip3 install kivy-ios
+---
 
 Additionally you would need few system dependencies and configuration.
 
 - Xcode 10 or above, with an iOS SDK and command line tools installed:
 
       xcode-select --install
-
-- Using brew, you can install the following dependencies:
-
-      brew install autoconf automake libtool pkg-config
-      brew link libtool
 
 ## Using the toolchain
 

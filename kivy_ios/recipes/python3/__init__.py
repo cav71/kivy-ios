@@ -1,7 +1,6 @@
-from kivy_ios.toolchain import Recipe, shprint
+from kivy_ios.toolchain import Recipe, shprint, sh
 from kivy_ios.context_managers import cd
 from os.path import join
-import sh
 import shutil
 import os
 import logging
@@ -12,7 +11,7 @@ logger = logging.getLogger(__name__)
 class Python3Recipe(Recipe):
     version = "3.9.2"
     url = "https://www.python.org/ftp/python/{version}/Python-{version}.tgz"
-    depends = ["hostpython3", "libffi", "openssl"]
+    depends = ["libffi", "openssl"]
     library = "libpython3.9.a"
     pbx_libraries = ["libz", "libbz2", "libsqlite3"]
 
@@ -128,7 +127,7 @@ class Python3Recipe(Recipe):
                     PYTHONPATH=$(shell test -f pybuilddir.txt && echo $(abs_builddir)/`cat pybuilddir.txt`:)$(srcdir)/Lib\
                     _PYTHON_SYSCONFIGDATA_NAME=_sysconfigdata_$(ABIFLAGS)_$(MACHDEP)_$(MULTIARCH)\
                     {}".format(sh.Command(self.ctx.hostpython)),
-                _env=build_env)
+                env=build_env)
         shprint(sh.make, self.ctx.concurrent_make, "CFLAGS={}".format(build_env["CFLAGS"]))
 
     def install(self):
@@ -139,7 +138,7 @@ class Python3Recipe(Recipe):
                 "-C", build_dir,
                 "install",
                 "prefix={}".format(join(self.ctx.dist_dir, "root", "python3")),
-                _env=build_env)
+                env=build_env)
         self.install_mock_modules()
         self.reduce_python()
 

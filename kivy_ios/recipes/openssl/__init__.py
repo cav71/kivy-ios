@@ -1,6 +1,5 @@
-from kivy_ios.toolchain import Recipe, shprint
+from kivy_ios.toolchain import Recipe, shprint, sh
 from os.path import join
-import sh
 
 
 arch_mapper = {'x86_64': 'darwin64-x86_64-cc',
@@ -17,10 +16,10 @@ class OpensslRecipe(Recipe):
     def build_arch(self, arch):
         build_env = arch.get_env()
         target = arch_mapper[arch.arch]
-        shprint(sh.env, _env=build_env)
+        shprint(sh.env, env=build_env)
         sh.perl(join(self.build_dir, "Configure"),
                 target,
-                _env=build_env)
+                env=build_env)
         if target.endswith('-cross'):
             with open('Makefile', 'r') as makefile:
                 filedata = makefile.read()

@@ -47,8 +47,18 @@ class ShCommand:
         self.flag = flag
         self.log = log
 
+    def __str__(self):
+        return str(self.cmd)
+
     def __call__(self, *args, **kwargs):
-        arguments = [self.cmd,] + [ str(a) for a in args if not isinstance(a, Flag) ]
+        arguments = [self.cmd,] 
+        for a in args:
+            if isinstance(a, Flag):
+                continue
+            if isinstance(a, (list, tuple)):
+                arguments.extend([ str(x) for x in a])
+            else:
+                arguments.append(str(a))
         flag = [ f for f in args if isinstance(f, Flag) ]
         assert len(flag) in {0, 1}, f"cannot pass more than one or no flags [{flag}]"
         flag = flag[0] if flag else self.flag
@@ -122,6 +132,9 @@ class Sh(ShBase):
         if abort:
             raise FileNotFound(f"cannot find executable {arg}")
         return Path(result) if result else None
+
+    def glob(self, arg: str) -> Optional[Path]:
+        return [ str(p) for p in Path.cwd().glob(arg)]
 
     def cmd(self, name: Union[str, Path], abort: bool=True) -> Optional[Callable]:
         exe = self.which(name, abort=abort)
