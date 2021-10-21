@@ -1395,9 +1395,13 @@ pip           Install a pip dependency into the distribution
         else:
             ctx = Context()
             for name in Recipe.list_recipes():
-                with suppress(Exception):
+                recipe_name, recipe_version = name, "import failed"
+                try:
                     recipe = Recipe.get_recipe(name, ctx)
-                    print("{recipe.name:<12} {recipe.version:<8}".format(recipe=recipe))
+                    recipe_name, recipe_version = recipe.name, recipe.version
+                except:
+                    logger.debug("failed to losd %s", name, exc_info=1)
+                print(f"{recipe_name:<12} {recipe_version:<8}")
 
     def clean(self):
         def clean_cache(recipe, ctx):
