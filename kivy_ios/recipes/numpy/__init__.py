@@ -1,6 +1,5 @@
-from kivy_ios.toolchain import CythonRecipe
+from kivy_ios.toolchain import CythonRecipe, sh
 from os.path import join
-import sh
 import shutil
 
 

@@ -1,6 +1,5 @@
-from kivy_ios.toolchain import CythonRecipe, shprint
+from kivy_ios.toolchain import CythonRecipe, shprint, sh
 from os.path import join
-import sh
 import os
 
 

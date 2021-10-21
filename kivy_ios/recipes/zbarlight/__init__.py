@@ -1,7 +1,6 @@
 import os
-from kivy_ios.toolchain import Recipe
+from kivy_ios.toolchain import Recipe, sh
 from os.path import join
-import sh
 import fnmatch
 from distutils.dir_util import copy_tree
 

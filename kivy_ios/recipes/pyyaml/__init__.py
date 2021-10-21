@@ -1,7 +1,6 @@
 # pure-python package, this can be removed when we'll support any python package
 import os
-import sh
-from kivy_ios.toolchain import PythonRecipe, shprint
+from kivy_ios.toolchain import PythonRecipe, shprint, sh
 
 
 class PyYamlRecipe(PythonRecipe):

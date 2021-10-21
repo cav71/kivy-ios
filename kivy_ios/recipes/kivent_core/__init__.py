@@ -3,8 +3,7 @@ Author: Lawrence Du
 E-mail: larrydu88@gmail.com
 """
 
-from kivy_ios.toolchain import CythonRecipe, shprint
-import sh
+from kivy_ios.toolchain import CythonRecipe, shprint, sh
 from os.path import join
 from os import chdir
 import logging

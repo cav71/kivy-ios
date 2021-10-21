@@ -1,8 +1,7 @@
 # pure-python package, this can be removed when we'll support any python package
-from kivy_ios.toolchain import PythonRecipe, shprint
+from kivy_ios.toolchain import PythonRecipe, shprint, sh
 from kivy_ios.context_managers import cd
 from os.path import join
-import sh
 
 
 class ItsDangerousRecipe(PythonRecipe):

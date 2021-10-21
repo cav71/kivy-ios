@@ -1,6 +1,5 @@
-from kivy_ios.toolchain import Recipe, shprint
+from kivy_ios.toolchain import Recipe, shprint, sh
 from os.path import join
-import sh
 
 
 class CurlRecipe(Recipe):
