@@ -7,7 +7,7 @@ import os
 class WerkzeugRecipe(PythonRecipe):
     version = "1.0.1"
     url = "https://github.com/mitsuhiko/werkzeug/archive/{version}.zip"
-    depends = ["python", "openssl"]
+    depends = ["python3", ]
 
     def install(self):
         arch = list(self.filtered_archs)[0]

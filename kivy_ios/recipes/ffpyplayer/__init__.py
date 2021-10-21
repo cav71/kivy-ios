@@ -6,7 +6,7 @@ class FFPyplayerRecipe(CythonRecipe):
     version = "4.2.0"
     url = "https://github.com/matham/ffpyplayer/archive/{version}.zip"
     library = "libffpyplayer.a"
-    depends = ["python", "ffmpeg"]
+    depends = ["python3", "ffmpeg"]
     pbx_frameworks = [
         "CoreVideo", "CoreMedia", "CoreImage", "AVFoundation", "UIKit",
         "CoreMotion"]

@@ -8,7 +8,7 @@ from os.path import join
 class PycryptoRecipe(CythonRecipe):
     version = "2.6.1"
     url = "https://ftp.dlitz.net/pub/dlitz/crypto/pycrypto/pycrypto-{version}.tar.gz"
-    depends = ["python", "openssl"]
+    depends = ["python3",]
     include_per_arch = True
     library = "libpycrypto.a"
 

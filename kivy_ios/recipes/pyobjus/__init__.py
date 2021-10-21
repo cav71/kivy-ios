@@ -5,7 +5,7 @@ class PyobjusRecipe(CythonRecipe):
     version = "master"
     url = "https://github.com/kivy/pyobjus/archive/{version}.zip"
     library = "libpyobjus.a"
-    depends = ["python"]
+    depends = ["python3"]
     pre_build_ext = True
 
 

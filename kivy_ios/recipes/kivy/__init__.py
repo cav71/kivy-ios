@@ -15,8 +15,7 @@ class KivyRecipe(CythonRecipe):
     url = "https://github.com/kivy/kivy/archive/{version}.zip"
     library = "libkivy.a"
     depends = ["sdl2", "sdl2_image", "sdl2_mixer", "sdl2_ttf", "ios",
-               "pyobjus", "python", "host_setuptools3"]
-    python_depends = ["certifi"]
+               "pyobjus", "python3",]
     pbx_frameworks = ["OpenGLES", "Accelerate", "CoreMedia", "CoreVideo"]
     pre_build_ext = True
 

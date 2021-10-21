@@ -15,7 +15,7 @@ class KiventCoreRecipe(CythonRecipe):
     version = 'master'
     url = 'https://github.com/kivy/kivent/archive/{version}.zip'
     name = 'kivent_core'
-    depends = ['libffi', 'kivy']  # note: unsure if libffi is necessary here
+    depends = ['kivy']  # note: unsure if libffi is necessary here
     pre_build_ext = False
     subbuilddir = False
     cythonize = True

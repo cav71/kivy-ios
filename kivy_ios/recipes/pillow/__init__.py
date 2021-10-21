@@ -15,7 +15,6 @@ class PillowRecipe(CythonRecipe):
         "python3",
         "ios",
     ]
-    python_depends = ["setuptools"]
     pbx_libraries = ["libz", "libbz2"]
     include_per_arch = True
     cythonize = False
